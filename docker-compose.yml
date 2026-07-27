@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  water_meter_manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: water_meter_manager
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - water_meter_data:/app/server
+      - water_meter_uploads:/app/server/uploads
+
+volumes:
+  water_meter_data:
+  water_meter_uploads:

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+
+# Databases & local state
+*.db
+*.sqlite
+server/water_meter.db
+server/data/
+
+# Uploaded image files
+server/uploads/*
+!server/uploads/.gitkeep
+
+# System & IDE files
+.DS_Store
+*.log
+.vscode/
+.idea/
