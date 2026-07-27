@@ -41,7 +41,7 @@ export default function App() {
       {/* Top Header */}
       <Navbar />
 
-      <div style={{ maxWidth: 1280, width: '100%', margin: '0 auto', flex: 1, display: 'flex', gap: 16, padding: '20px 16px' }}>
+      <div className="main-app-layout" style={{ maxWidth: 1280, width: '100%', margin: '0 auto', flex: 1, display: 'flex', gap: 16, padding: '20px 16px' }}>
         
         {/* Sidebar Menu */}
         <Sidebar 
@@ -53,7 +53,7 @@ export default function App() {
         />
 
         {/* Main Workspace Content Area */}
-        <main style={{ flex: 1, minWidth: 0 }}>
+        <main className="main-workspace-content" style={{ flex: 1, minWidth: 0 }}>
           {activeTab === 'dashboard' || activeTab === 'properties' ? (
             user.role === 'owner' ? (
               <OwnerDashboard 
