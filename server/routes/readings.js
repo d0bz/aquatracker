@@ -3,20 +3,150 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const nodemailer = require('nodemailer');
 const db = require('../db');
 const { processMeterImage } = require('../ocr');
 
-// Configure SMTP transporter using GroupFund hostinger SMTP credentials
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.hostinger.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER || 'hi@groupfund.eu',
-    pass: process.env.SMTP_PASSWORD || 'Uinamui9!'
+// Helper to send email via Postkontor email processor microservice
+async function sendEmailViaProcessor({ to, name, subject, html, text, category = 'water-meter-report' }) {
+  const serviceUrl = process.env.EMAIL_PROCESSOR_URL;
+  const apiKey = process.env.EMAIL_PROCESSOR_KEY;
+
+  if (!serviceUrl || !apiKey) {
+    throw new Error('Email processor configuration missing: EMAIL_PROCESSOR_URL and EMAIL_PROCESSOR_KEY must be set in environment variables.');
   }
-});
+
+  const response = await fetch(`${serviceUrl}/jobs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      to,
+      name,
+      subject,
+      html,
+      text,
+      category
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Email processor microservice error (HTTP ${response.status}): ${errText}`);
+  }
+
+  return await response.json();
+}
+
+// Helper to send email notification to property owner via email-processor service
+async function sendOwnerEmailNotification(meterId, tenantUserId, readingValue, consumption, imagePath) {
+  try {
+    const details = db.prepare(`
+      SELECT 
+        p.name as property_name, p.address as property_address,
+        m.name as meter_name, m.meter_number, m.meter_label, m.initial_reading,
+        owner.name as owner_name, owner.email as owner_email,
+        tenant.name as tenant_name, tenant.email as tenant_email
+      FROM meters m
+      JOIN properties p ON m.property_id = p.id
+      JOIN users owner ON p.owner_id = owner.id
+      LEFT JOIN users tenant ON tenant.id = ?
+      WHERE m.id = ?
+    `).get(tenantUserId, meterId);
+
+    if (!details) return null;
+
+    // Fetch previous reading
+    const prevReading = db.prepare(`
+      SELECT reading_value, created_at
+      FROM meter_readings
+      WHERE meter_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1 OFFSET 1
+    `).get(meterId);
+
+    const prevReadingValue = prevReading ? prevReading.reading_value : details.initial_reading;
+    const prevReadingDate = prevReading ? new Date(prevReading.created_at).toLocaleDateString() : 'Initial Baseline Setup';
+    const currentDate = new Date().toLocaleDateString();
+
+    const emailSubject = `[AquaTrack] New Water Meter Reading (${readingValue} m³) - ${details.property_name}`;
+    const appUrl = 'https://aquameter.deploynext.com';
+
+    const textContent = `Hello ${details.owner_name},
+
+A new water meter reading has been logged by tenant ${details.tenant_name || 'Tenant'} (${details.tenant_email || 'N/A'}).
+
+SUMMARY OF SUBMISSION:
+------------------------------------------------------------
+• Property:         ${details.property_name} (${details.property_address})
+• Meter Name:       ${details.meter_name} ${details.meter_label ? `(Tag #${details.meter_label})` : ''}
+• Previous Reading: ${prevReadingValue} m³ (${prevReadingDate})
+• New Reading:      ${readingValue} m³ (${currentDate})
+• Net Consumption:  +${consumption} m³
+
+View photo & full meter audit history online:
+${appUrl}
+
+Best regards,
+AquaTrack Water Management System`;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 12px; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px;">
+          💧 AquaTrack Water Meter Notification
+        </h2>
+        <p style="font-size: 1rem; color: #e2e8f0;">Hello <strong>${details.owner_name}</strong>,</p>
+        <p style="font-size: 0.95rem; color: #cbd5e1;">
+          A new water meter reading has been submitted by tenant <strong>${details.tenant_name || 'Tenant'}</strong> (<code>${details.tenant_email || 'N/A'}</code>).
+        </p>
+        
+        <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #0ea5e9;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <tr>
+              <td style="padding: 6px 0; color: #94a3b8;">Property:</td>
+              <td style="padding: 6px 0; color: #ffffff; font-weight: bold;">${details.property_name} (${details.property_address})</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #94a3b8;">Meter Name:</td>
+              <td style="padding: 6px 0; color: #ffffff; font-weight: bold;">${details.meter_name} ${details.meter_label ? `(Tag #${details.meter_label})` : ''}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #94a3b8;">Previous Reading:</td>
+              <td style="padding: 6px 0; color: #94a3b8;">${prevReadingValue} m³ <span style="font-size: 0.8rem;">(${prevReadingDate})</span></td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #94a3b8;">New Reading:</td>
+              <td style="padding: 6px 0; color: #38bdf8; font-weight: bold; font-size: 1.1rem;">${readingValue} m³ <span style="font-size: 0.8rem; color: #94a3b8; font-weight: normal;">(${currentDate})</span></td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #94a3b8;">Net Consumption:</td>
+              <td style="padding: 6px 0; color: #4ade80; font-weight: bold;">+${consumption} m³</td>
+            </tr>
+          </table>
+        </div>
+
+        <p style="margin-top: 24px;">
+          <a href="${appUrl}" style="background-color: #0ea5e9; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+            View Photo & Audit Log Online
+          </a>
+        </p>
+      </div>
+    `;
+
+    return await sendEmailViaProcessor({
+      to: details.owner_email,
+      name: details.owner_name,
+      subject: emailSubject,
+      text: textContent,
+      html: htmlContent,
+      category: 'single-reading-notice'
+    });
+  } catch (err) {
+    console.error('Failed to dispatch owner email via processor:', err);
+    return null;
+  }
+}
 
 // Configure multer storage for uploaded images
 const storage = multer.diskStorage({
@@ -143,7 +273,7 @@ router.post('/batch-ocr', upload.array('meterImages', 20), async (req, res) => {
   }
 });
 
-// Submit/Save single meter reading without auto email
+// Submit/Save single meter reading
 router.post('/', (req, res) => {
   const userId = req.headers['x-user-id'];
   const { meterId, readingValue, imagePath, ocrRawText, ocrConfidence, notes } = req.body;
@@ -195,7 +325,7 @@ router.post('/', (req, res) => {
   });
 });
 
-// Submit Batch Readings without auto email
+// Submit Batch Readings
 router.post('/batch-submit', (req, res) => {
   const userId = req.headers['x-user-id'];
   const { readings } = req.body;
@@ -247,7 +377,7 @@ router.post('/batch-submit', (req, res) => {
   });
 });
 
-// Consolidated Owner Report Endpoint (Manual trigger by tenant for all changed meters)
+// Consolidated Owner Report Endpoint (Dispatches email via Postkontor microservice)
 router.post('/notify-owner', async (req, res) => {
   const userId = req.headers['x-user-id'];
 
@@ -385,12 +515,13 @@ AquaTrack Water Management System`;
   `;
 
   try {
-    await transporter.sendMail({
-      from: `"${process.env.SMTP_FROM_NAME || 'AquaTrack Water Meters'}" <${process.env.SMTP_FROM_EMAIL || 'hi@groupfund.eu'}>`,
+    const jobResult = await sendEmailViaProcessor({
       to: first.owner_email,
+      name: first.owner_name,
       subject: emailSubject,
       text: textContent,
-      html: htmlContent
+      html: htmlContent,
+      category: 'monthly-water-report'
     });
 
     // Mark all unnotified readings as notified
@@ -398,18 +529,19 @@ AquaTrack Water Management System`;
     const placeholders = readingIds.map(() => '?').join(',');
     db.prepare(`UPDATE meter_readings SET notified_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...readingIds);
 
-    console.log(`✅ [CONSOLIDATED REPORT SENT TO OWNER] ${readingIds.length} meters sent to ${first.owner_email}`);
+    console.log(`✅ [POSTKONTOR EMAIL ENQUEUED] Job ID ${jobResult.id} for ${first.owner_email} (${readingIds.length} meters)`);
 
     res.json({
       success: true,
       count: readingIds.length,
+      jobId: jobResult.id,
       ownerEmail: first.owner_email,
       ownerName: first.owner_name,
-      message: `Monthly report for ${readingIds.length} meter(s) sent successfully to property owner (${first.owner_email})!`
+      message: `Monthly report for ${readingIds.length} meter(s) queued for delivery to property owner (${first.owner_email})!`
     });
   } catch (err) {
-    console.error('Failed to send owner summary report:', err);
-    res.status(500).json({ error: 'Failed to send email to property owner: ' + err.message });
+    console.error('Failed to send owner summary report via Postkontor:', err);
+    res.status(500).json({ error: 'Failed to queue email for property owner: ' + err.message });
   }
 });
 
