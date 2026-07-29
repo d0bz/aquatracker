@@ -1,6 +1,6 @@
 # 💧 AquaTracker — Smart Water Meter Management & AI OCR System
 
-AquaTracker is a modern full-stack web application designed for property owners and tenants to effortlessly manage water meters, log meter readings, extract digits automatically using Gemini Vision AI, and dispatch consolidated email reports to property owners via real SMTP.
+AquaTracker is a modern full-stack web application designed for property owners and tenants to effortlessly manage water meters, log meter readings, extract digits automatically using Gemini Vision AI, and dispatch consolidated email reports to property owners via the Postkontor email processor microservice.
 
 ---
 
@@ -18,12 +18,12 @@ AquaTracker is a modern full-stack web application designed for property owners 
   - Support for single meter uploads with immediate numeric value entry.
   - **Bunch Upload (1 to N)**: Upload multiple meter photos simultaneously with drag-and-drop auto-routing.
 
-- **📧 Real SMTP Email Reports**:
-  - Consolidated multi-meter reports sent directly to property owners via Hostinger Nodemailer SMTP.
-  - Includes previous reading values, dates recorded, net consumption deltas, and direct links to photo evidence.
+- **📧 Postkontor Email Processor Integration**:
+  - Consolidated multi-meter reports dispatched asynchronously via the Postkontor email microservice (`https://postkontor.deploynext.com`).
+  - Includes previous reading values, dates recorded, net consumption deltas, HTML audit tables, and direct links to photo evidence.
 
 - **🐳 Docker & Production Ready**:
-  - Containerized with Docker and Docker Compose.
+  - Containerized with Docker and Docker Compose multi-stage builds.
   - Standalone SQLite database with foreign key cascades and lightweight footprint.
 
 ---
@@ -33,7 +33,7 @@ AquaTracker is a modern full-stack web application designed for property owners 
 - **Frontend**: React, Vite, Lucide Icons, Chart.js (`react-chartjs-2`), Vanilla CSS (Custom Design Token System)
 - **Backend**: Node.js, Express, Better-SQLite3
 - **AI OCR**: Google Gemini Vision API (`@google/genai`)
-- **Email Dispatch**: Nodemailer (Hostinger SMTP)
+- **Email Service**: Postkontor Email Microservice (`EMAIL_PROCESSOR_URL` & `EMAIL_PROCESSOR_KEY` REST API)
 - **Containerization**: Docker, Docker Compose
 
 ---
@@ -64,13 +64,9 @@ PORT=3001
 NODE_ENV=development
 GEMINI_API_KEY=YOUR_GEMINI_VISION_API_KEY
 
-# SMTP Email Configuration
-SMTP_HOST=smtp.hostinger.com
-SMTP_PORT=587
-SMTP_USER=hi@groupfund.eu
-SMTP_PASSWORD=YOUR_SMTP_PASSWORD
-SMTP_FROM_EMAIL=hi@groupfund.eu
-SMTP_FROM_NAME=AquaTrack Water Meters
+# Email Processor Microservice Configuration
+EMAIL_PROCESSOR_URL=https://postkontor.deploynext.com
+EMAIL_PROCESSOR_KEY=YOUR_POSTKONTOR_BEARER_TOKEN
 ```
 
 ### 3. Run Development Server
